@@ -63,7 +63,12 @@ graph_builder.add_conditional_edges(
 )
 # Any time a tool is called, we return to the chatbot to decide the next step
 graph_builder.add_edge("tools", "chatbot")
-graph = graph_builder.compile()
+
+################################################################
+
+from langgraph.checkpoint.memory import MemorySaver
+memory = MemorySaver()
+graph = graph_builder.compile(checkpointer=memory)
 
 
 from IPython.display import Image, display
@@ -76,7 +81,9 @@ except Exception:
 ################################################################
 
 def stream_graph_updates(user_input: str):
-    for event in graph.stream({"messages": [{"role": "user", "content": user_input}]}):
+    for event in graph.stream(
+        {"messages": [{"role": "user", "content": user_input}]},
+        {"configurable": {"thread_id": "1"}}):
         for value in event.values():
             print("Assistant:", value["messages"][-1].content)
 
