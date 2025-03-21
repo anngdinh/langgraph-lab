@@ -23,6 +23,8 @@ graph_builder = StateGraph(State)
 
 # from langchain_anthropic import ChatAnthropic
 # llm = ChatAnthropic(model="claude-3-5-sonnet-20240620")
+# from langchain_openai import ChatOpenAI
+# llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 from langchain_google_genai import ChatGoogleGenerativeAI
 llm = ChatGoogleGenerativeAI(
     model="gemini-1.5-flash",
@@ -30,8 +32,17 @@ llm = ChatGoogleGenerativeAI(
     temperature=0
 )
 
+################################################################
+
+from langchain_community.tools.tavily_search import TavilySearchResults
+tool = TavilySearchResults(max_results=2)
+tools = [tool]
+llm_with_tools = llm.bind_tools(tools)
+
+################################################################
+
 def chatbot(state: State):
-    return {"messages": [llm.invoke(state["messages"])]}
+    return {"messages": [llm_with_tools.invoke(state["messages"])]}
 
 
 # The first argument is the unique node name
@@ -41,7 +52,17 @@ graph_builder.add_node("chatbot", chatbot)
 
 
 graph_builder.add_edge(START, "chatbot")
-graph_builder.add_edge("chatbot", END)
+
+from langgraph.prebuilt import ToolNode, tools_condition
+tool_node = ToolNode(tools=[tool])
+graph_builder.add_node("tools", tool_node)
+
+graph_builder.add_conditional_edges(
+    "chatbot",
+    tools_condition, END
+)
+# Any time a tool is called, we return to the chatbot to decide the next step
+graph_builder.add_edge("tools", "chatbot")
 graph = graph_builder.compile()
 
 
