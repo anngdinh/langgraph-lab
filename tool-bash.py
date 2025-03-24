@@ -14,9 +14,9 @@ import os
 
 _ = load_dotenv(override=True)  # read local .env file
 
-# tool = TavilySearchResults(
-#     max_results=5, include_answer=True, include_raw_content=True, include_images=True
-# )
+tavily_tool = TavilySearchResults(
+    max_results=5, include_answer=True, include_raw_content=True, include_images=True
+)
 from langchain_community.tools import ShellTool
 
 shell_tool = ShellTool()
@@ -123,12 +123,13 @@ model = ChatGoogleGenerativeAI(
 
 async def main():
     async with AsyncSqliteSaver.from_conn_string(":memory:") as memory:
-        abot = Agent(model, [shell_tool], system=prompt, checkpointer=memory)
+        abot = Agent(model, [tavily_tool, shell_tool], system=prompt, checkpointer=memory)
         messages = HumanMessage(
             # content= "list all file and folder in the current directory"
             # content= "how many pod are running in all namespace?"
             # content= "list all pod that restart in all namespace?"
-            content= "find all pod that logs contain error in namespace px-kafka? Print these error logs"
+            # content= "find all pod that logs contain error in namespace px-kafka? Print these error logs"
+            content= "write a report about the GDP of Vietnam in 2024 then save it in current directory use markdown format"
         )
         thread = {"configurable": {"thread_id": "1234"}}
         async for event in abot.graph.astream({"messages": [messages]}, thread):
