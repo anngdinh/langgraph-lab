@@ -1,34 +1,42 @@
+from langchain_core.prompts import ChatPromptTemplate
+import asyncio
+from IPython.display import Image, display
+from langgraph.graph import StateGraph, START
+from langgraph.graph import END
+from typing import Literal
+from typing import Union
+from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
+from typing import Annotated, List, Tuple
+import operator
+from langgraph.prebuilt import create_react_agent
+import llms
+import tools
 from dotenv import load_dotenv, find_dotenv
 import os
 _ = load_dotenv(override=True)  # read local .env file
 
 ################################################################
-import tools
 ################################################################
-import llms
 ################################################################
 
 tools = [
     # tools.tavily_tool,
     tools.duckduckgo_tool,
-    tools.shell_tool, 
-    tools.search_weather, 
-    tools.find_city_abbr, 
+    tools.shell_tool,
+    tools.search_weather,
+    tools.find_city_abbr,
     tools.find_city_gdp,
     tools.generate_access_token,
     tools.get_balance,
 ]
 
-from langgraph.prebuilt import create_react_agent
 
-agent_executor = create_react_agent(llms.New_Gemini_Pro(), tools, prompt="You are a helpful assistant.")
+agent_executor = create_react_agent(
+    llms.New_Gemini_Pro(), tools, prompt="You are a helpful assistant.")
 
 ################################################################
 # Define the State
-
-import operator
-from typing import Annotated, List, Tuple
-from typing_extensions import TypedDict
 
 
 class PlanExecute(TypedDict):
@@ -37,9 +45,9 @@ class PlanExecute(TypedDict):
     past_steps: Annotated[List[Tuple], operator.add]
     response: str
 
+
 ################################################################
 # Planning Step
-from pydantic import BaseModel, Field
 
 
 class Plan(BaseModel):
@@ -48,7 +56,7 @@ class Plan(BaseModel):
     steps: List[str] = Field(
         description="different steps to follow, should be in sorted order"
     )
-from langchain_core.prompts import ChatPromptTemplate
+
 
 planner_prompt = ChatPromptTemplate.from_messages(
     [
@@ -74,8 +82,6 @@ planner = planner_prompt | llms.New_Gemini_Pro().with_structured_output(Plan)
 
 ################################################################
 # Re-Plan Step
-
-from typing import Union
 
 
 class Response(BaseModel):
@@ -116,9 +122,6 @@ replanner = replanner_prompt | llms.New_Gemini_Pro().with_structured_output(Act)
 ################################################################
 # Create the Graph
 
-from typing import Literal
-from langgraph.graph import END
-
 
 async def execute_step(state: PlanExecute):
     plan = state["plan"]
@@ -156,10 +159,6 @@ def should_end(state: PlanExecute):
         return "agent"
 
 
-
-
-from langgraph.graph import StateGraph, START
-
 workflow = StateGraph(PlanExecute)
 
 # Add the plan node
@@ -192,22 +191,21 @@ workflow.add_conditional_edges(
 app = workflow.compile()
 
 ################################################################
-from IPython.display import Image, display
 
 display(Image(app.get_graph(xray=True).draw_mermaid_png()))
 
 ################################################################
 
-import asyncio
 
 config = {"recursion_limit": 50}
-inputs = {"input": 
-    "what is the hometown of the mens 2024 Australia open winner's parents?"
-    # "what is the average GDP of San Francisco and London? return a polite answer."
-    # "Compare the weather of San Francisco and London. Write a polite answer."
-    # "get current balance"
-    # "get a new access token"
-    }
+inputs = {"input":
+          "what is the hometown of the mens 2024 Australia open winner's parents?"
+          # "what is the average GDP of San Francisco and London? return a polite answer."
+          # "Compare the weather of San Francisco and London. Write a polite answer."
+          # "get current balance"
+          # "get a new access token"
+          }
+
 
 async def main():
     async for event in app.astream(inputs, config=config):
