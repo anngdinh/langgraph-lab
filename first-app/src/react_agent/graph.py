@@ -13,13 +13,13 @@ from langgraph.prebuilt import ToolNode
 
 from react_agent.configuration import Configuration
 from react_agent.state import InputState, State
-from react_agent.tools import TOOLS
+from react_agent.tools import SEARCH_TOOLS, EXECUTE_TOOLS
 from react_agent.utils import load_chat_model
 
 # Define the function that calls the model
 
 
-async def call_model(
+async def search_node(
     state: State, config: RunnableConfig
 ) -> Dict[str, List[AIMessage]]:
     """Call the LLM powering our "agent".
@@ -35,8 +35,8 @@ async def call_model(
     """
     configuration = Configuration.from_runnable_config(config)
 
-    # Initialize the model with tool binding. Change the model or add more tools here.
-    model = load_chat_model(configuration.model).bind_tools(TOOLS)
+    # Initialize the model with tool binding. Change the model or add more search_tools here.
+    model = load_chat_model(configuration.model).bind_tools(SEARCH_TOOLS)
 
     # Format the system prompt. Customize this to change the agent's behavior.
     system_message = configuration.system_prompt.format(
@@ -71,15 +71,13 @@ async def call_model(
 builder = StateGraph(State, input=InputState, config_schema=Configuration)
 
 # Define the two nodes we will cycle between
-builder.add_node(call_model)
-builder.add_node("tools", ToolNode(TOOLS))
+builder.add_node(search_node)
+builder.add_node("search_tools", ToolNode(SEARCH_TOOLS))
 
-# Set the entrypoint as `call_model`
-# This means that this node is the first one called
-builder.add_edge("__start__", "call_model")
+builder.add_edge("__start__", "search_node")
 
 
-def route_model_output(state: State) -> Literal["__end__", "tools"]:
+def route_model_output(state: State) -> Literal["__end__", "search_tools"]:
     """Determine the next node based on the model's output.
 
     This function checks if the model's last message contains tool calls.
@@ -88,7 +86,7 @@ def route_model_output(state: State) -> Literal["__end__", "tools"]:
         state (State): The current state of the conversation.
 
     Returns:
-        str: The name of the next node to call ("__end__" or "tools").
+        str: The name of the next node to call ("__end__" or "search_tools").
     """
     last_message = state.messages[-1]
     if not isinstance(last_message, AIMessage):
@@ -99,20 +97,16 @@ def route_model_output(state: State) -> Literal["__end__", "tools"]:
     if not last_message.tool_calls:
         return "__end__"
     # Otherwise we execute the requested actions
-    return "tools"
+    return "search_tools"
 
 
-# Add a conditional edge to determine the next step after `call_model`
+# Add a conditional edge to determine the next step after `search_node`
 builder.add_conditional_edges(
-    "call_model",
-    # After call_model finishes running, the next node(s) are scheduled
-    # based on the output from route_model_output
+    "search_node",
     route_model_output,
 )
 
-# Add a normal edge from `tools` to `call_model`
-# This creates a cycle: after using tools, we always return to the model
-builder.add_edge("tools", "call_model")
+builder.add_edge("search_tools", "search_node")
 
 # Compile the builder into an executable graph
 # You can customize this by adding interrupt points for state updates
