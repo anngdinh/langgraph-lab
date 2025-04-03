@@ -53,6 +53,10 @@ class State(InputState):
     It is set to 'True' when the step count reaches recursion_limit - 1.
     """
 
+    next: str = field(default="")
+    """
+    """
+
     # Additional attributes can be added here as needed.
     # Common examples include:
     # retrieved_documents: List[Document] = field(default_factory=list)
