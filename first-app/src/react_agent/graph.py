@@ -32,7 +32,7 @@ def make_supervisor_node(llm: BaseChatModel, members: list[str]) -> str:
         f" following workers: {members}. Given the following user request,"
         " respond with the worker to act next and reason. Each worker will perform a"
         " task and respond with their results and status. You must check if the result satisfies the question or not. When finished,"
-        " respond with FINISH."
+        " respond with FINISH. If the worker needs more information, ask the user."
     )
 
     class Router(TypedDict):
@@ -68,7 +68,7 @@ llm = ChatGoogleGenerativeAI(
     temperature=0
 )
 
-supervisor_node = make_supervisor_node(llm, ["search_node"])
+supervisor_node = make_supervisor_node(llm, ["search_node", "terminal_node"])
 
 
 def search_node(
@@ -88,11 +88,17 @@ def search_node(
     configuration = Configuration.from_runnable_config(config)
 
     # Format the system prompt. Customize this to change the agent's behavior.
-    system_message = "You are a smart research assistant. Use the tools to look up information. \
+    system_message_format = """You are a smart research assistant. Use the tools to look up information. \
 You are allowed to make multiple calls (either together or in sequence). \
 Only look up information when you are sure of what you want. \
 If you need to look up some information before asking a follow up question, \
-you are allowed to do that!"
+you are allowed to do that!
+
+System time: {system_time}"""
+
+    system_message = system_message_format.format(
+        system_time=datetime.now(tz=timezone.utc).isoformat()
+    )
 
     model = llm.bind_tools(SEARCH_TOOLS)
 
@@ -119,19 +125,74 @@ you are allowed to do that!"
     return {"messages": [response]}
 
 
-# Define a new graph
+def terminal_node(
+    state: State, config: RunnableConfig
+) -> Dict[str, List[AIMessage]]:
+    """Call the LLM powering our "agent".
 
+    This function prepares the prompt, initializes the model, and processes the response.
+
+    Args:
+        state (State): The current state of the conversation.
+        config (RunnableConfig): Configuration for the model run.
+
+    Returns:
+        dict: A dictionary containing the model's response message.
+    """
+    configuration = Configuration.from_runnable_config(config)
+
+    # Format the system prompt. Customize this to change the agent's behavior.
+    system_message_format = """You are a smart research assistant. Use the tools to look up information. \
+You are allowed to make multiple calls (either together or in sequence). \
+Only look up information when you are sure of what you want. \
+If you need to look up some information before asking a follow up question, \
+you are allowed to do that! If you don't know what to do, ask the supervisor.
+
+System time: {system_time}"""
+
+    system_message = system_message_format.format(
+        system_time=datetime.now(tz=timezone.utc).isoformat()
+    )
+
+    model = llm.bind_tools(EXECUTE_TOOLS)
+
+    # Get the model's response
+    response = cast(
+        AIMessage,
+        model.invoke(
+            [{"role": "system", "content": system_message}, *state.messages], config
+        ),
+    )
+
+    # Handle the case when it's the last step and the model still wants to use a tool
+    if state.is_last_step and response.tool_calls:
+        return {
+            "messages": [
+                AIMessage(
+                    id=response.id,
+                    content="Sorry, I could not find an answer to your question in the specified number of steps.",
+                )
+            ]
+        }
+
+    # Return the model's response as a list to be added to existing messages
+    return {"messages": [response]}
+
+
+# Define a new graph
 builder = StateGraph(State, input=InputState, config_schema=Configuration)
 
 # Define the two nodes we will cycle between
 builder.add_node("supervisor_node", supervisor_node)
 builder.add_node(search_node)
+builder.add_node(terminal_node)
 builder.add_node("search_tools", ToolNode(SEARCH_TOOLS))
+builder.add_node("terminal_tools", ToolNode(EXECUTE_TOOLS))
 
 builder.add_edge("__start__", "supervisor_node")
 
 
-def route_model_output(state: State) -> Literal["supervisor_node", "search_tools"]:
+def route_search_node(state: State) -> Literal["supervisor_node", "search_tools"]:
     """Determine the next node based on the model's output.
 
     This function checks if the model's last message contains tool calls.
@@ -154,13 +215,42 @@ def route_model_output(state: State) -> Literal["supervisor_node", "search_tools
     return "search_tools"
 
 
+def route_terminal_node(state: State) -> Literal["supervisor_node", "terminal_tools"]:
+    """Determine the next node based on the model's output.
+
+    This function checks if the model's last message contains tool calls.
+
+    Args:
+        state (State): The current state of the conversation.
+
+    Returns:
+        str: The name of the next node to call ("supervisor_node" or "terminal_tools").
+    """
+    last_message = state.messages[-1]
+    if not isinstance(last_message, AIMessage):
+        raise ValueError(
+            f"Expected AIMessage in output edges, but got {type(last_message).__name__}"
+        )
+    # If there is no tool call, then we finish
+    if not last_message.tool_calls:
+        return "supervisor_node"
+    # Otherwise we execute the requested actions
+    return "terminal_tools"
+
+
 # Add a conditional edge to determine the next step after `search_node`
 builder.add_conditional_edges(
     "search_node",
-    route_model_output,
+    route_search_node,
 )
-
 builder.add_edge("search_tools", "search_node")
+
+builder.add_conditional_edges(
+    "terminal_node",
+    route_terminal_node,
+)
+builder.add_edge("terminal_tools", "terminal_node")
+
 
 # Compile the builder into an executable graph
 # You can customize this by adding interrupt points for state updates
