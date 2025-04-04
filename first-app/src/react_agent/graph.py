@@ -6,7 +6,7 @@ Works with a chat model with tool calling support.
 from datetime import datetime, timezone
 from typing import Dict, List, Literal, cast
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
@@ -23,6 +23,50 @@ from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 from langgraph.prebuilt import create_react_agent
+
+from typing import Literal
+from langgraph.types import interrupt, Command
+
+from langgraph.prebuilt.interrupt import (
+    ActionRequest,
+    HumanInterrupt,
+    HumanInterruptConfig,
+    HumanResponse,
+)
+
+
+def human_approval(state: State) -> Command[Literal["terminal_tools", "terminal_node"]]:
+    last_message = state.messages[-1]
+    tool_call = last_message.tool_calls[-1]
+    request = HumanInterrupt(
+        action_request=ActionRequest(
+            action="run_command",  # The action being requested
+            args=last_message.tool_calls,  # The command to be executed
+        ),
+        config=HumanInterruptConfig(
+            allow_ignore=False,    # Allow skipping this step
+            allow_respond=False,   # Allow text feedback
+            allow_edit=False,     # Don't allow editing
+            allow_accept=True     # Allow direct acceptance
+        ),
+        description="Are you sure you want to run this command?",
+    )
+
+    # should response in studio: [{"type": "accept"}]
+    human_response: HumanResponse = interrupt([request])[0]
+    print(f" *********** Human response: {human_response}")
+    if human_response.get("type") == "accept":
+        goto = "terminal_tools"
+        return Command(goto=goto, update={"next": goto})
+    else:
+        goto = "terminal_node"
+        return Command(goto=goto, update={"next": goto, "messages": [
+            ToolMessage(
+                tool_call_id=tool_call["id"],
+                status="error",
+                content="Sorry, I don't have permission to do that. Please ask the user.",
+            )
+        ]})
 
 
 def make_supervisor_node(llm: BaseChatModel, members: list[str]) -> str:
@@ -188,6 +232,7 @@ builder.add_node(search_node)
 builder.add_node(terminal_node)
 builder.add_node("search_tools", ToolNode(SEARCH_TOOLS))
 builder.add_node("terminal_tools", ToolNode(EXECUTE_TOOLS))
+builder.add_node("human_approval", human_approval)
 
 builder.add_edge("__start__", "supervisor_node")
 
@@ -215,7 +260,7 @@ def route_search_node(state: State) -> Literal["supervisor_node", "search_tools"
     return "search_tools"
 
 
-def route_terminal_node(state: State) -> Literal["supervisor_node", "terminal_tools"]:
+def route_terminal_node(state: State) -> Literal["supervisor_node", "human_approval"]:
     """Determine the next node based on the model's output.
 
     This function checks if the model's last message contains tool calls.
@@ -224,7 +269,7 @@ def route_terminal_node(state: State) -> Literal["supervisor_node", "terminal_to
         state (State): The current state of the conversation.
 
     Returns:
-        str: The name of the next node to call ("supervisor_node" or "terminal_tools").
+        str: The name of the next node to call ("supervisor_node" or "human_approval").
     """
     last_message = state.messages[-1]
     if not isinstance(last_message, AIMessage):
@@ -235,7 +280,7 @@ def route_terminal_node(state: State) -> Literal["supervisor_node", "terminal_to
     if not last_message.tool_calls:
         return "supervisor_node"
     # Otherwise we execute the requested actions
-    return "terminal_tools"
+    return "human_approval"
 
 
 # Add a conditional edge to determine the next step after `search_node`
