@@ -33,9 +33,14 @@ inputs = {
             # "find information about Bukayo Saka's parents"
             # "last game of Arsenal"
             "Find the most recent Arsenal match, find the players who scored in that match and find the parents of those players."
-            # "list all pods"
-            # "different LangGraph and LangChain. Write a report and save it to a file."
+            # "use terminal to list all pods"
+            # "find different between LangGraph and LangChain then save the report as a file using terminal. "
             # "different revert and forward proxy, use tools"
+            # "find the latest cve related to k8s, find and run command to check if my cluster is vulnerable (using terminal tools)"
+            # "find the latest cve related to k8s, save it to a file using terminal. "
+            # "use terminal to list all pod in all ns"
+            # "what is vks?"
+            # "use search tool \"give me full yaml to create a NLB in my VKS kubernetes cluster\""
         )
     ]
 }

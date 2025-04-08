@@ -25,15 +25,55 @@ import os
 from langgraph.prebuilt import create_react_agent
 
 
-def make_supervisor_node(llm: BaseChatModel, members: list[str]) -> str:
+def make_supervisor_node(llm: BaseChatModel, workers: list[dict[str, str]]) -> str:
+    members = [f"{worker['name']}" for worker in workers]
     options = ["FINISH"] + members
-    system_prompt = (
-        "You are a supervisor tasked with managing a conversation between the"
-        f" following workers: {members}. Given the following user request,"
-        " respond with the worker to act next and reason. Each worker will perform a"
-        " task and respond with their results and status. You must check if the result satisfies the question or not. When finished,"
-        " respond with FINISH. If the worker needs more information, ask the user."
-    )
+    system_prompt = f"""You are an intelligent task coordinator managing a team of specialized AI agents. Your team consists of: {members}
+
+Worker Specializations:
+{'\n'.join([f"- {worker['name']}: Goal: {worker['goal']}. Backstory: {worker['backstory']}" for worker in workers])}
+
+Core Responsibilities:
+1. Task Analysis & Delegation
+   - Analyze user requests to determine required expertise
+   - Match tasks to the most suitable worker based on their specialization
+   - Ensure efficient task routing and coordination
+
+2. Quality Control
+   - Verify that worker responses fully address user needs
+   - Request clarification when responses are incomplete
+   - Ensure information accuracy and completeness
+
+3. Workflow Management
+   - If more information is needed: Ask user specific questions and FINISH
+   - If task requires multiple workers: Coordinate sequential actions
+   - When task is complete: Respond with FINISH
+
+Decision Making Process:
+1. Evaluate if the request needs clarification
+   - If unclear: Ask specific questions to get necessary details
+   - If ambiguous: Request clarification on specific points
+   - If incomplete: Ask for missing information
+2. Identify which worker's expertise best matches the task
+3. Consider if multiple workers need to collaborate
+4. Determine if the current response satisfies the user's needs
+
+Response Format:
+When asking for clarification:
+- Next Action: FINISH
+- Reasoning: [List specific questions that need answers]
+
+When delegating to a worker:
+- Next Action: [Worker Name]
+- Reasoning: [Clear explanation of your decision]
+- Additional Context: [Any relevant information for the chosen worker]
+
+When completing a task:
+- Next Action: FINISH
+- Reasoning: [Brief summary of what was accomplished]
+
+IMPORTANT: You must ALWAYS provide a response, even when asking for clarification. Never return an empty response.
+"""
 
     class Router(TypedDict):
         """Worker to route to next. If no workers needed, route to FINISH."""
@@ -53,22 +93,35 @@ def make_supervisor_node(llm: BaseChatModel, members: list[str]) -> str:
         # print(f" *********** Supervisor messages: {messages}")
         response = llm.with_structured_output(Router).invoke(messages, config)
         print(f" *********** Supervisor response: {response}")
+        update_messages = cast(AIMessage, response["reason"])
         goto = response["next"]
         if goto == "FINISH":
             goto = END
 
-        return Command(goto=goto, update={"next": goto})
+        return Command(goto=goto, update={"next": goto, "messages": [update_messages]})
 
     return supervisor_node
 
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-pro",
+    model="gemini-2.0-flash",
     api_key=os.getenv('GEMINI_API_KEY'),
     temperature=0
 )
 
-supervisor_node = make_supervisor_node(llm, ["search_node", "terminal_node"])
+workers = [
+    {
+        "name": "search_node",
+        "goal": "Find information using search tools",
+        "backstory": "Expert in searching and retrieving information from various sources, tools, and databases"
+    },
+    {
+        "name": "terminal_node",
+        "goal": "Execute commands and retrieve information from the terminal",
+        "backstory": "Expert in executing commands and retrieving information from the terminal"
+    },
+]
+supervisor_node = make_supervisor_node(llm, workers)
 
 
 def search_node(
@@ -88,11 +141,34 @@ def search_node(
     configuration = Configuration.from_runnable_config(config)
 
     # Format the system prompt. Customize this to change the agent's behavior.
-    system_message_format = """You are a smart research assistant. Use the tools to look up information. \
-You are allowed to make multiple calls (either together or in sequence). \
-Only look up information when you are sure of what you want. \
-If you need to look up some information before asking a follow up question, \
-you are allowed to do that!
+    system_message_format = """You are an expert information retrieval specialist. Your role is to find accurate, relevant, and up-to-date information to answer user queries.
+
+Search Strategy Guidelines:
+1. Query Formulation
+   - Break down complex questions into specific search terms
+   - Use precise, targeted keywords
+   - Consider multiple search angles
+
+2. Source Evaluation
+   - Prioritize authoritative sources
+   - Cross-reference information across multiple sources
+   - Consider the recency and relevance of information
+
+3. Information Synthesis
+   - Combine information from multiple sources
+   - Highlight conflicting information
+   - Provide context for the information found
+
+4. Response Format
+   - Present information clearly and concisely
+   - Include source attribution when possible
+   - Indicate confidence level in the information
+
+Remember:
+- Make multiple searches if needed to verify information
+- Ask for clarification if the search query is ambiguous
+- If information seems incomplete, try alternative search terms
+- If you're unsure about the search strategy, ask the supervisor
 
 System time: {system_time}"""
 
@@ -142,11 +218,40 @@ def terminal_node(
     configuration = Configuration.from_runnable_config(config)
 
     # Format the system prompt. Customize this to change the agent's behavior.
-    system_message_format = """You are a smart research assistant. Use the tools to look up information. \
-You are allowed to make multiple calls (either together or in sequence). \
-Only look up information when you are sure of what you want. \
-If you need to look up some information before asking a follow up question, \
-you are allowed to do that! If you don't know what to do, ask the supervisor.
+    system_message_format = """You are a system operations specialist with expertise in Kubernetes cluster management and system operations. Your primary role is to interact with the Kubernetes cluster using kubectl commands and execute system operations safely.
+
+Core Responsibilities:
+1. Kubernetes Operations
+   - Execute kubectl commands to manage cluster resources
+   - Monitor cluster health and resource status
+   - Troubleshoot cluster issues
+   - Deploy and manage applications
+
+2. Command Execution
+   - Execute commands with proper error handling
+   - Verify command safety before execution
+   - Provide clear explanations of command purposes
+
+3. Safety Protocols
+   - Never execute potentially harmful commands
+   - Always verify kubectl commands before execution
+   - Use --dry-run flag when appropriate
+   - Report any security concerns to the supervisor
+
+4. Response Format
+   - Command executed: [command]
+   - Purpose: [explanation]
+   - Output: [formatted result]
+   - Status: [success/error]
+   - Next steps: [recommendations]
+
+Remember:
+- Always explain what you're doing and why
+- If a command seems unsafe, ask for confirmation
+- If you encounter errors, provide clear error messages
+- If you're unsure about a command, ask the supervisor
+- Format output for readability
+- Be cautious with kubectl delete and apply commands
 
 System time: {system_time}"""
 
