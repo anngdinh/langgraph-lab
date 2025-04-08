@@ -27,13 +27,21 @@ def sum_exponents(
     return sum(pow(v, p) for k, v in values.items() if k in {'a', 'e', 'i', 'o', 'u'})
 
 tools = [sum_exponents]
-agent = create_react_agent(llm, tools)
+agent = create_react_agent(
+    llm, 
+    tools, 
+    prompt="You are a smart research assistant. Use the search engine to look up information. \
+You are allowed to make multiple calls (either together or in sequence). \
+Only look up information when you are sure of what you want. \
+If you need to look up some information before asking a follow up question, \
+you are allowed to do that!",
+)
 
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, AIMessage, ChatMessage
 mess = agent.invoke({"messages": [("human", "find sum of exponents for these values {'a': 2', 'b': 3, 'e': 4}, use power of 2")]})
 # print(mess["messages"][-1].content)
 for m in mess["messages"]:
     if isinstance(m, AIMessage):
-        print(type(m), ":", m.content, ", ", m.additional_kwargs)
+        print(type(m), ":", m.content, ", ", m.tool_calls)
     else:
         print(type(m), ":", m.content)

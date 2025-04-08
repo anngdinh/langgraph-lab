@@ -42,6 +42,24 @@ llm = ChatGoogleGenerativeAI(
     api_key=os.getenv('GEMINI_API_KEY'),
     temperature=0,
 )
+
+# from langchain_ollama import ChatOllama
+# llm = ChatOllama(
+#     model="llama3.2",
+#     # api_key=os.getenv('OLLAMA_API_KEY'),
+#     temperature=0,
+# )
+
+# from langchain_deepseek import ChatDeepSeek
+# llm = ChatDeepSeek(
+#     model="deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+#     api_key=os.getenv('DEEPSEEK_API_KEY'),
+#     api_base="https://model-000.ai-gateway.vngcloud.tech/deepseek/chat/completions",
+#     temperature=0,
+#     max_tokens=None,
+#     timeout=None,
+#     max_retries=2,
+# )
     
 ################################################################
 # Supervisor
@@ -51,7 +69,7 @@ from typing_extensions import TypedDict
 from langgraph.graph import MessagesState, END
 from langgraph.types import Command
 
-members = ["researcher", "calculator"]
+members = ["flight_assistant", "driving_assistant"]
 # Our team supervisor is an LLM node. It just picks the next agent to process
 # and decides when the work is completed
 options = members + ["FINISH"]
@@ -61,7 +79,7 @@ system_prompt = (
     f" following workers: {members}. Given the following user request,"
     " respond with the worker to act next. Each worker will perform a"
     " task and respond with their results and status. When finished,"
-    " respond with FINISH."
+    " respond with FINISH. NEVER attempt to answer questions outside of the scope of the workers, just return `I don't know`."
 )
 
 
@@ -93,18 +111,20 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import create_react_agent
 
+prompt_template = "You are a smart assistant. ONLY answer questions if {topic}, otherwise return 'that question is out of my scope.'."
 
-research_agent = create_react_agent(
-    llm, tools=[tavily_tool], prompt="You are a researcher. DO NOT do any math."
+flight_agent = create_react_agent(
+    llm, tools=[tavily_tool], prompt=prompt_template.format(topic="input is about flying, flights, airlines, or travel by air")
 )
 
 
-def research_node(state: State) -> Command[Literal["supervisor"]]:
-    result = research_agent.invoke(state)
+def flight_node(state: State) -> Command[Literal["supervisor"]]:
+    result = flight_agent.invoke(state)
+    # print("aaaaaaa", result)
     return Command(
         update={
             "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="researcher")
+                HumanMessage(content=result["messages"][-1].content, name="flight_assistant")
             ]
         },
         goto="supervisor",
@@ -112,17 +132,18 @@ def research_node(state: State) -> Command[Literal["supervisor"]]:
 
 
 # NOTE: THIS PERFORMS ARBITRARY CODE EXECUTION, WHICH CAN BE UNSAFE WHEN NOT SANDBOXED
-code_agent = create_react_agent(
-    llm, tools=[python_repl_tool], prompt="You are a calculator. You can execute math."
+driving_agent = create_react_agent(
+    llm, tools=[tavily_tool], prompt=prompt_template.format(topic="input is about driving")
 )
 
 
-def code_node(state: State) -> Command[Literal["supervisor"]]:
-    result = code_agent.invoke(state)
+def driving_node(state: State) -> Command[Literal["supervisor"]]:
+    result = driving_agent.invoke(state)
+    # print("aaaaaaa", result)
     return Command(
         update={
             "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="calculator")
+                HumanMessage(content=result["messages"][-1].content, name="driving_assistant")
             ]
         },
         goto="supervisor",
@@ -132,29 +153,25 @@ def code_node(state: State) -> Command[Literal["supervisor"]]:
 builder = StateGraph(State)
 builder.add_edge(START, "supervisor")
 builder.add_node("supervisor", supervisor_node)
-builder.add_node("researcher", research_node)
-builder.add_node("calculator", code_node)
-from langgraph.checkpoint.memory import MemorySaver
-memory = MemorySaver()
-graph = builder.compile(checkpointer=memory)
+builder.add_node("flight_assistant", flight_node)
+builder.add_node("driving_assistant", driving_node)
+graph = builder.compile()
 
 from IPython.display import display, Image
 display(Image(graph.get_graph().draw_png()))
 
 
 ################################################################
-config = {"configurable": {"thread_id": "1"}}
-events = graph.stream(
+
+for s in graph.stream(
     {"messages": [("user",
-                # "Average of 21 and 49", # MALFORMED_FUNCTION_CALL
-                # "GDP of New York and California",
-                   "What is average GDP of New York and California?",
-                # "How many games have Arsenal played in EPL season 2024-2025? How many are left?",
-                   )]},
-    config,
-    subgraphs=True,
-    stream_mode="values",
-)
-for event in events:
-    if "messages" in event:
-        event["messages"][-1].pretty_print()
+                # "How many flights are there from Hanoi to Ho Chi Minh City?",
+                # "How many highways are there from Hanoi to Ho Chi Minh City?",
+                # "compare time to drive from Hanoi to Ho Chi Minh City and Da Nang to Ho Chi Minh City",
+                "how far between Hanoi and Ho Chi Minh City when flying? How about driving?",
+                # "how is GDP of Vietnam compared to Thailand?",
+                # "how long does it take to take a trip around the world in a boat?",
+            )]}, subgraphs=True
+):
+    print("bbbbbbb", s)
+    print("----")

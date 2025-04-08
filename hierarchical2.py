@@ -1,35 +1,26 @@
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from IPython.display import Image, display
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage, trim_messages
+from langgraph.types import Command
+from langgraph.graph import StateGraph, MessagesState, START, END
+from langchain_core.language_models.chat_models import BaseChatModel
+from typing import List, Optional, Literal, Union
+from typing_extensions import TypedDict
+import tools
 from dotenv import load_dotenv, find_dotenv
 import os
 _ = load_dotenv(override=True)  # read local .env file
 
 ################################################################
 # ResearchTeam tools
-
-from typing import Annotated, List
-
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.tools import tool
-
-tavily_tool = TavilySearchResults(max_results=5)
-
-from langchain_community.tools import ShellTool
-shell_tool = ShellTool()
-    
 ################################################################
 # Document writing team tools
-
-from typing_extensions import TypedDict
 
 
 ################################################################
 # Helper Utilities
-
-from typing import List, Optional, Literal
-from langchain_core.language_models.chat_models import BaseChatModel
-
-from langgraph.graph import StateGraph, MessagesState, START, END
-from langgraph.types import Command
-from langchain_core.messages import HumanMessage, trim_messages
 
 
 class State(MessagesState):
@@ -50,6 +41,7 @@ def make_supervisor_node(llm: BaseChatModel, members: list[str]) -> str:
         """Worker to route to next. If no workers needed, route to FINISH."""
 
         next: Literal[*options]
+        reason: str
 
     def supervisor_node(state: State) -> Command[Literal[*members, "__end__"]]:
         """An LLM-based router."""
@@ -57,6 +49,7 @@ def make_supervisor_node(llm: BaseChatModel, members: list[str]) -> str:
             {"role": "system", "content": system_prompt},
         ] + state["messages"]
         response = llm.with_structured_output(Router).invoke(messages)
+        print(" ********* Supervisor Response: ", response)
         goto = response["next"]
         if goto == "FINISH":
             goto = END
@@ -68,44 +61,54 @@ def make_supervisor_node(llm: BaseChatModel, members: list[str]) -> str:
 ################################################################
 # Research Team
 
-from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
 
 # from langchain_openai import ChatOpenAI
 # llm = ChatOpenAI(model="gpt-4o")
-
-from langchain_google_genai import ChatGoogleGenerativeAI
 llm = ChatGoogleGenerativeAI(
     model="gemini-1.5-pro",
     api_key=os.getenv('GEMINI_API_KEY'),
     temperature=0
 )
 
-search_agent = create_react_agent(llm, tools=[tavily_tool])
+search_agent = create_react_agent(llm, tools=[tools.duckduckgo_tool], prompt="You are a smart research assistant. Use the tools to look up information. \
+You are allowed to make multiple calls (either together or in sequence). \
+Only look up information when you are sure of what you want. \
+If you need to look up some information before asking a follow up question, \
+you are allowed to do that!")
+
+
 def search_node(state: State) -> Command[Literal["supervisor"]]:
+    print(" ********* Search Node: ", state)
     result = search_agent.invoke(state)
     return Command(
         update={
             "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="search")
+                AIMessage(content=result["messages"]
+                          [-1].content, name="search")
             ]
         },
         # We want our workers to ALWAYS "report back" to the supervisor when done
         goto="supervisor",
     )
 
-terminal_agent = create_react_agent(llm, tools=[shell_tool])
+
+terminal_agent = create_react_agent(llm, tools=[tools.shell_tool])
+
+
 def terminal_node(state: State) -> Command[Literal["supervisor"]]:
+    print(" ********* Terminal Node: ", state)
     result = terminal_agent.invoke(state)
     return Command(
         update={
             "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="terminal")
+                AIMessage(content=result["messages"]
+                          [-1].content, name="terminal")
             ]
         },
         # We want our workers to ALWAYS "report back" to the supervisor when done
         goto="supervisor",
     )
+
 
 research_supervisor_node = make_supervisor_node(llm, ["search", "terminal"])
 
@@ -120,7 +123,6 @@ research_builder.add_node("terminal", terminal_node)
 research_builder.add_edge(START, "supervisor")
 research_graph = research_builder.compile()
 
-from IPython.display import Image, display
 
 display(Image(research_graph.get_graph().draw_png()))
 
@@ -128,8 +130,10 @@ display(Image(research_graph.get_graph().draw_png()))
 # Testing the graph
 
 for s in research_graph.stream(
-    {"messages": [("user", "when is Taylor Swift's next tour?")]},
+    # {"messages": [("user", "when is Taylor Swift's next tour?")]},
     # {"messages": [("user", "what is current EPL table?")]},
+    {"messages": [
+        ("user", "different LangGraph and LangChain. Write a report and save it to a file.")]},
     {"recursion_limit": 100},
 ):
     print(s)

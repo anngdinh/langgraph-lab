@@ -15,8 +15,8 @@ from colorama import Fore, Back, Style
 
 @tool
 def generate_sql(question: str) -> str:
-    """Generate SQL query from question. It will return struct like this:`{"id": "", "text": "", "type": ""}`"""
-    print("Generating SQL query from question: ", question)
+    """Generate SQL query to answer question. You ONLY provide normal question (human language only). It will return struct like this:`{"id": "", "text": "", "type": ""}`"""
+    print(Fore.GREEN + "[tool] generate_sql(): " + question + Style.RESET_ALL)
     import requests
     url = 'https://hcm-03.console.vngcloud.tech/genai-platform/text-to-sql/api/v0/generate_sql'
     headers = {
@@ -44,7 +44,7 @@ def generate_sql(question: str) -> str:
 @tool
 def run_sql_by_id(id: str) -> str:
     """Run SQL query from id."""
-    print("Running SQL query from id: ", id)
+    print(Fore.GREEN + "[tool] run_sql_by_id(): " + id + Style.RESET_ALL)
     import requests
     url = 'https://hcm-03.console.vngcloud.tech/genai-platform/text-to-sql/api/v0/run_sql'
     headers = {
@@ -65,19 +65,33 @@ def run_sql_by_id(id: str) -> str:
 ################################################################
 from langchain_community.tools.tavily_search import TavilySearchResults
 # tavily_tool = TavilySearchResults(max_results=5)
-def tavily_tool(**kwargs):
+def tavily_tool(query: str)-> str:
     """Search for the information. You MUST provide the query."""
-    print(Fore.GREEN + "[tool] tavily_tool()" + Style.RESET_ALL)
-    return TavilySearchResults(**kwargs)
+    print(Fore.GREEN + "[tool] tavily_tool(): " + query + Style.RESET_ALL)
+    wrapped = TavilySearchResults()
+    result = wrapped.invoke({"query": query})
+    print(Fore.GREEN + "[tool] tavily_tool(): " + str(result) + Style.RESET_ALL)
+    return result
+    # return TavilySearchResults(**kwargs)
 
 from langchain_community.tools import ShellTool
-shell_tool = ShellTool()
+# shell_tool = ShellTool()
+def shell_tool(command: str)-> str:
+    """Run the command on shell. You MUST provide the command."""
+    print(Fore.GREEN + "[tool] shell_tool_run(): " + command + Style.RESET_ALL)
+    wrapped = ShellTool()
+    result = wrapped.invoke({"commands": command})
+    print(Fore.GREEN + "[tool] shell_tool_run(): " + str(result) + Style.RESET_ALL)
+    return result
 
 from langchain_community.tools import DuckDuckGoSearchRun
-def duckduckgo_tool(**kwargs):
-    """Search for the information. You MUST provide the query."""
-    print(Fore.GREEN + "[tool] duckduckgo_tool()" + Style.RESET_ALL)
-    return DuckDuckGoSearchRun(**kwargs)
+def duckduckgo_tool(query: str)-> str:
+    """Search for the information from internet ONLY. You MUST provide the query."""
+    print(Fore.GREEN + "[tool] duckduckgo_tool(): " + query + Style.RESET_ALL)
+    wrapped = DuckDuckGoSearchRun()
+    result = wrapped.invoke({"query": query})
+    print(Fore.GREEN + "[tool] duckduckgo_tool(): " + str(result) + Style.RESET_ALL)
+    return result
 ################################################################
 
 def find_city_gdp(city: str):

@@ -88,17 +88,40 @@ def stream_graph_updates(user_input: str):
             print("Assistant:", value["messages"][-1].content)
 
 
-while True:
-    try:
-        user_input = input("User: ")
-        if user_input.lower() in ["quit", "exit", "q"]:
-            print("Goodbye!")
-            break
+# while True:
+#     try:
+#         user_input = input("User: ")
+#         if user_input.lower() in ["quit", "exit", "q"]:
+#             print("Goodbye!")
+#             break
 
-        stream_graph_updates(user_input)
-    except:
-        # fallback if input() is not available
-        user_input = "What do you know about LangGraph?"
-        print("User: " + user_input)
-        stream_graph_updates(user_input)
-        break
+#         stream_graph_updates(user_input)
+#     except:
+#         # fallback if input() is not available
+#         user_input = "What do you know about LangGraph?"
+#         print("User: " + user_input)
+#         stream_graph_updates(user_input)
+#         break
+
+user_input = "Hi there! My name is Will."
+
+config = {"configurable": {"thread_id": "1"}}
+# The config is the **second positional argument** to stream() or invoke()!
+events = graph.stream(
+    {"messages": [{"role": "user", "content": user_input}]},
+    config,
+    stream_mode="values",
+)
+for event in events:
+    event["messages"][-1].pretty_print()
+    
+user_input = "Remember my name?"
+
+# The config is the **second positional argument** to stream() or invoke()!
+events = graph.stream(
+    {"messages": [{"role": "user", "content": user_input}]},
+    config,
+    stream_mode="values",
+)
+for event in events:
+    event["messages"][-1].pretty_print()
